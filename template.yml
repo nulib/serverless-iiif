@@ -9,9 +9,35 @@ Metadata:
     ReadmeUrl: README.md
     Labels: ["iiif", "image-processing"]
     HomePageUrl: https://github.com/samvera-labs/serverless-iiif
-    SemanticVersion: 2.0.3
+    SemanticVersion: 2.1.0
     SourceCodeUrl: https://github.com/samvera-labs/serverless-iiif
 Parameters:
+  UseCacheBucket:
+    Type: String
+    Description: Use an S3 Bucket to store responses > 6MB
+    AllowedValues:
+      - "true"
+      - "false"
+    Default: "true"
+  UseCloudFront:
+    Type: String
+    Description: Use a CloudFront distribution for caching and returning responses > 6MB (required if UseCacheBucket = true)
+    AllowedValues:
+      - "true"
+      - "false"
+    Default: "true"
+  CacheMinimumTTL:
+    Type: Number
+    Description: Minimum TTL (in seconds) for the CloudFront Cache
+    Default: 0
+  CacheMaximumTTL:
+    Type: Number
+    Description: Maximum TTL (in seconds) for the CloudFront Cache
+    Default: 31536000
+  CacheDefaultTTL:
+    Type: Number
+    Description: Default TTL (in seconds) for the CloudFront Cache
+    Default: 86400
   SourceBucket:
     Type: String
     Description: Name of bucket containing source images
@@ -23,6 +49,17 @@ Parameters:
     Type: Number
     Description: The timeout for the lambda.
     Default: 10
+Conditions:
+  CreateCacheBucket: 
+    Fn::Equals: [!Ref UseCacheBucket, "true"]
+  CreateDistribution: 
+    Fn::Or:
+      - Fn::Equals: [!Ref UseCloudFront, "true"]
+      - Fn::Equals: [!Ref UseCacheBucket, "true"]
+  CreateCacheBucketAndDistribution:
+    Fn::And:
+      - Condition: CreateCacheBucket
+      - Condition: CreateDistribution
 Resources:
   Dependencies:
     Type: "AWS::Serverless::LayerVersion"
@@ -36,6 +73,32 @@ Resources:
       LicenseInfo: "Apache-2.0"
     Metadata:
       BuildMethod: nodejs12.x
+  CacheBucket:
+    Type: "AWS::S3::Bucket"
+    Condition: CreateCacheBucket
+    Properties:
+      BucketName: 
+        Fn::Sub: "${AWS::StackName}-cache"
+      LifecycleConfiguration:
+        Rules:
+          - Status: Enabled
+            ExpirationInDays: 1
+  CacheBucketPolicy:
+    Type: "AWS::S3::BucketPolicy"
+    Condition: CreateCacheBucketAndDistribution
+    Properties:
+      Bucket: !Ref CacheBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:GetObject
+            Resource:
+              - Fn::Sub: "arn:aws:s3:::${CacheBucket}/*"
+            Principal:
+              CanonicalUser:
+                Fn::GetAtt: CachingIdentity.S3CanonicalUserId
   IiifFunction:
     Type: "AWS::Serverless::Function"
     Properties:
@@ -56,19 +119,32 @@ Resources:
                 - s3:ListBucket
                 - s3:GetBucketLocation
               Resource:
-                Fn::Sub: "arn:aws:s3:::${SourceBucket}"
+                - Fn::Sub: "arn:aws:s3:::${SourceBucket}"
+                - Fn::Sub: "arn:aws:s3:::${CacheBucket}"
             - Effect: Allow
               Action:
                 - s3:GetObject
                 - s3:GetObjectACL
               Resource:
-                Fn::Sub: "arn:aws:s3:::${SourceBucket}/*"
+                - Fn::Sub: "arn:aws:s3:::${SourceBucket}/*"
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:PutObject
+                - s3:DeleteObject
+              Resource:
+                - Fn::Sub: "arn:aws:s3:::${CacheBucket}/*"
             - Effect: Allow
               Action:
                 - s3:ListAllMyBuckets
               Resource: "*"
       Environment:
         Variables:
+          cacheBucket:
+            Fn::If: 
+              - CreateCacheBucket
+              - Fn::Sub: "${AWS::StackName}-cache"
+              - AWS::NoValue
           tiffBucket:
             Fn::Sub: "${SourceBucket}"
       Events:
@@ -125,6 +201,16 @@ Resources:
       Cors:
         AllowMethods: "'GET'"
         AllowOrigin: "'*'"
+      Auth:
+        ResourcePolicy:
+          CustomStatements:
+            - Effect: Allow
+              Principal: "*"
+              Action: "execute-api:Invoke"
+              Resource: "execute-api:/*/*/*"
+              Condition:
+                StringEquals:
+                  aws:UserAgent: "Amazon CloudFront"
       DefinitionBody:
         swagger: "2.0"
         info:
@@ -391,11 +477,73 @@ Resources:
             title: "Empty Schema"
         x-amazon-apigateway-binary-media-types:
           - "*/*"
+  CachingIdentity:
+    Type: "AWS::CloudFront::CloudFrontOriginAccessIdentity"
+    Condition: CreateDistribution
+    Properties:
+      CloudFrontOriginAccessIdentityConfig:
+        Comment: "Caching Distribution Identity"
+  CachingEndpoint:
+    Type: "AWS::CloudFront::Distribution"
+    Condition: CreateDistribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        PriceClass: PriceClass_100
+        Origins:
+          - Id: IiifApi
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+            DomainName:
+              Fn::Sub: "${IiifApi}.execute-api.${AWS::Region}.amazonaws.com"
+            OriginPath:
+              Fn::Sub: "/${IiifApi.Stage}"
+          - Fn::If:
+              - CreateCacheBucket
+              - Id: IiifCache
+                S3OriginConfig:
+                  OriginAccessIdentity: 
+                    Fn::Join:
+                      - ''
+                      - - 'origin-access-identity/cloudfront/'
+                        - !Ref CachingIdentity
+                DomainName:
+                  Fn::Sub: "${CacheBucket}.s3.${AWS::Region}.amazonaws.com"
+              - AWS::NoValue
+        OriginGroups:
+          Quantity: 
+            Fn::If: [CreateCacheBucket, 1, 0]
+          Items:
+            Fn::If:
+              - CreateCacheBucket
+              - - Id: IiifOrigins
+                  Members:
+                    Quantity: 2
+                    Items:
+                      - OriginId: IiifApi
+                      - OriginId: IiifCache
+                  FailoverCriteria:
+                      StatusCodes:
+                          Items: [404]
+                          Quantity: 1
+              - []
+        DefaultCacheBehavior:
+          TargetOriginId: 
+            Fn::If: [CreateCacheBucket, IiifOrigins, IiifApi]
+          ViewerProtocolPolicy: https-only
+          ForwardedValues:
+            QueryString: false
+          MinTTL: !Ref CacheMinimumTTL
+          MaxTTL: !Ref CacheMaximumTTL
+          DefaultTTL: !Ref CacheDefaultTTL
 Outputs:
   Endpoint:
     Description: IIIF Endpoint URL
     Value:
-      Fn::Sub: "https://${IiifApi}.execute-api.${AWS::Region}.amazonaws.com/${IiifApi.Stage}/iiif/2/"
+      Fn::If:
+        - CreateDistribution
+        - Fn::Sub: "https://${IiifApi}.execute-api.${AWS::Region}.amazonaws.com/${IiifApi.Stage}/iiif/2/"
+        - Fn::Sub: "https://${CachingEndpoint.DomainName}/iiif/2/"
   ApiId:
     Description: API Gateway ID
     Value:

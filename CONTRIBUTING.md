@@ -8,16 +8,6 @@ This document describes how to deploy to a development environment and submit yo
 - Requires [SAM](https://aws.amazon.com/serverless/sam/) and [aws-cli](https://aws.amazon.com/cli/)
 - Building dependencies with the correct architecture requires [Docker](https://docs.docker.com/get-docker/).
 
-## Build Dependencies
-
-```sh
-pushd dependencies/nodejs
-docker run -v "$PWD":/var/task lambci/lambda:build-nodejs12.x npm install
-popd
-```
-
-Note: You shouldn't need to repeat the above during code iteration, unless you make changes to `dependencies/nodejs/package.json`
-
 ## Deploy
 
 ### Using SAM
@@ -25,6 +15,7 @@ Note: You shouldn't need to repeat the above during code iteration, unless you m
 The easiest way to deploy is using the SAM guided command:
 
 ```sh
+sam build --use-container
 sam deploy --guided
 ```
 

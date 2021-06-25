@@ -31,8 +31,10 @@ const isBase64 = (result) => {
 };
 
 const isTooLarge = (content) => {
-  return content.length > 6 * 1024 * 1024;
+  const payloadLimit = (6 * 1024 * 1024) / 1.4;
+  return content.length > payloadLimit;
 };
+
 const getRegion = (context) => {
   return context.invokedFunctionArn.match(/^arn:aws:lambda:(\w+-\w+-\d+):/)[1];
 };

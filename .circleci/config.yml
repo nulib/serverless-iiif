@@ -9,8 +9,8 @@ jobs:
       - checkout
       - restore_cache:
           keys:
-            - node-modules-v1-{{ checksum "package.json" }}-{{ .Branch }}
-            - node-modules-v1-{{ checksum "package.json" }}-
+            - node-modules-v1-{{ checksum "yarn.lock" }}-{{ .Branch }}
+            - node-modules-v1-{{ checksum "yarn.lock" }}-
             - node-modules-v1-
       - run:
           name:  Download cc-test-reporter
@@ -21,14 +21,14 @@ jobs:
           name: Install JS Dependencies
           command: yarn install
       - save_cache:
-          key: node-modules-v1-{{ checksum "package.json" }}-{{ .Branch }}
+          key: node-modules-v1-{{ checksum "yarn.lock" }}-{{ .Branch }}
           paths:
             - ~/serverless-iiif/node_modules
       - run:
           name: JS Tests
           command: |
             ./cc-test-reporter before-build
-            yarn test -- --coverage
+            yarn test --coverage
             mv coverage/clover.xml ./clover.xml
             ./cc-test-reporter after-build --coverage-input-type clover --exit-code $?
       - run:

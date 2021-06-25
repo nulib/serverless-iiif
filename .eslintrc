@@ -11,6 +11,7 @@
     "__PROD__"              : false,
     "__COVERAGE__"          : false
   },
+  "ignorePatterns": "tests/*",
   "rules" : {
     "brace-style"           : [2, "1tbs"],
     "comma-dangle"          : [2, "never"],

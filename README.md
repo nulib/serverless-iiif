@@ -66,9 +66,11 @@ To generate a code coverage report run:
 npm test --coverage
 ```
 
-## Known Limitations
+## Notes
 
-AWS API Gateway Lamnbda integration has a payload (request/response body) size limit of approximately 6MB in both directions. Please see [LAMBDA_LIMIT.md](LAMBDA_LIMIT.md) for details and workarounds.
+AWS API Gateway Lambda integration has a payload (request/response body) size limit of approximately 6MB in both directions. To overcome this limitation, the API is configured behind an AWS CloudFront distribution with two origins – the API and a cache bucket. Responses larger than 6MB are saved to the cache bucket at the same relative path as the request, and the API returns a `404 Not Found` response to CloudFront. CloudFront then fails over to the second origin (the cache bucket), where it finds the actual response and returns it.
+
+The cache bucket uses an S3 lifecycle rule to expire cached responses in 1 day.
 
 ## License
 

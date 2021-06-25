@@ -3,6 +3,4 @@
 coverage
 deploy.yaml
 node_modules
-package-lock.json
 samconfig.toml
-yarn.lock

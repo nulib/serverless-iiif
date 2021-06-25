@@ -1,12 +1,13 @@
 class errorClass {
-  constructor(err) {
-    this.err = err
+  constructor (err) {
+    this.err = err;
   }
-  toString() {
-    return this.err
+
+  toString () {
+    return this.err;
   }
 }
 
 module.exports = {
-  errorClass: errorClass,
-}
+  errorClass: errorClass
+};

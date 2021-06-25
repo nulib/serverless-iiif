@@ -81,15 +81,16 @@ describe('helper functions', () => {
   });
 
   describe('isTooLarge', () => {
+    const payloadLimit = (6 * 1024 * 1024) / 1.4;
     it('is > 6MB', () => {
       const content = {
-        length: 6 * 1024 * 1024 + 1
+        length: payloadLimit + 1
       };
       expect(isTooLarge(content)).toEqual(true);
     });
     it('is < 6MB', () => {
       const content = {
-        length: 6 * 1024 * 1024 - 1
+        length: payloadLimit - 1
       };
       expect(isTooLarge(content)).toEqual(false);
     });
